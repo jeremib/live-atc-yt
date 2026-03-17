@@ -1,7 +1,15 @@
 import fetch from 'node-fetch';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { parsePlsFile, parsePlsTitle } from '../utils/plsParser';
 import { TTLCache } from '../utils/cache';
 import { log } from '../vite';
+
+// Bright Data residential proxy for LiveATC requests
+function getProxyAgent(): HttpsProxyAgent<string> | undefined {
+  const proxyUrl = process.env.BRIGHTDATA_PROXY_URL;
+  if (!proxyUrl) return undefined;
+  return new HttpsProxyAgent(proxyUrl);
+}
 
 /**
  * Service to handle fetching and managing audio streams
@@ -19,11 +27,13 @@ export class StreamService {
    */
   async getStreamUrlFromPls(plsUrl: string): Promise<string | null> {
     try {
+      const agent = getProxyAgent();
       const response = await fetch(plsUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; AudioStreamHub/1.0)',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': '*/*',
         },
+        ...(agent && { agent }),
       });
 
       if (!response.ok) {
@@ -79,9 +89,11 @@ export class StreamService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
+      const agent = getProxyAgent();
       const resp = await fetch(url, {
         signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AudioStreamHub/1.0)' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        ...(agent && { agent }),
       });
       if (!resp.ok) return null;
       const text = await resp.text();
@@ -172,8 +184,10 @@ export class StreamService {
     return async (req, res) => {
       try {
         // Fetch the stream
+        const agent = getProxyAgent();
         const streamResponse = await fetch(streamUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AudioStreamHub/1.0)' },
+          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+          ...(agent && { agent }),
         });
         
         if (!streamResponse.ok) {

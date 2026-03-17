@@ -19,19 +19,25 @@ export class StreamService {
    */
   async getStreamUrlFromPls(plsUrl: string): Promise<string | null> {
     try {
-      const response = await fetch(plsUrl);
-      
+      const response = await fetch(plsUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; AudioStreamHub/1.0)',
+          'Accept': '*/*',
+        },
+      });
+
       if (!response.ok) {
         throw new Error(`Failed to fetch PLS file: ${response.status} ${response.statusText}`);
       }
-      
+
       const plsContent = await response.text();
+      log(`PLS content from ${plsUrl}: ${plsContent.substring(0, 200)}`, 'streamService');
       const streamUrls = parsePlsFile(plsContent);
-      
+
       if (!streamUrls || streamUrls.length === 0) {
-        throw new Error('No valid stream URLs found in PLS file');
+        throw new Error(`No valid stream URLs found in PLS file. Content: ${plsContent.substring(0, 200)}`);
       }
-      
+
       // Return the first stream URL (most PLS files only have one)
       return streamUrls[0];
     } catch (error) {
@@ -73,7 +79,10 @@ export class StreamService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const resp = await fetch(url, { signal: controller.signal });
+      const resp = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AudioStreamHub/1.0)' },
+      });
       if (!resp.ok) return null;
       const text = await resp.text();
       const parsed = parsePlsFile(text);
@@ -163,7 +172,9 @@ export class StreamService {
     return async (req, res) => {
       try {
         // Fetch the stream
-        const streamResponse = await fetch(streamUrl);
+        const streamResponse = await fetch(streamUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AudioStreamHub/1.0)' },
+        });
         
         if (!streamResponse.ok) {
           log(`Stream response not OK: ${streamResponse.status}`, 'streamProxy');

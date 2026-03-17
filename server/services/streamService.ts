@@ -184,10 +184,11 @@ export class StreamService {
     return async (req, res) => {
       try {
         // Fetch the stream
-        const agent = getProxyAgent();
+        // Audio streams connect directly — CDN servers (d.liveatc.net) typically
+        // don't block datacenter IPs, and routing continuous audio through the
+        // residential proxy would be expensive per-GB.
         const streamResponse = await fetch(streamUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-          ...(agent && { agent }),
         });
         
         if (!streamResponse.ok) {

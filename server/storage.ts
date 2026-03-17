@@ -25,36 +25,6 @@ export class MemStorage implements IStorage {
     this.streams = new Map();
     this.userCurrentId = 1;
     this.streamCurrentId = 1;
-    
-    // Add some default streams for testing
-    this.initDefaultStreams();
-  }
-
-  private initDefaultStreams() {
-    const defaultStreams: InsertStream[] = [
-      {
-        name: "KATL ATIS Arrival",
-        url: "https://www.liveatc.net/play/katl_atis_arr.pls",
-        fileName: "katl_atis_arr.pls",
-        type: "liveatc",
-      },
-      {
-        name: "KATL Ground Control",
-        url: "https://www.liveatc.net/play/katl_ground.pls",
-        fileName: "katl_ground.pls",
-        type: "liveatc",
-      },
-      {
-        name: "KBOS Tower",
-        url: "https://www.liveatc.net/play/kbos_twr.pls",
-        fileName: "kbos_twr.pls",
-        type: "liveatc",
-      }
-    ];
-    
-    defaultStreams.forEach(stream => {
-      this.createStream(stream);
-    });
   }
 
   // Stream methods

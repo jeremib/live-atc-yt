@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { parsePlsFile } from '../utils/plsParser';
+import { parsePlsFile, parsePlsTitle } from '../utils/plsParser';
 import { log } from '../vite';
 
 /**
@@ -34,6 +34,85 @@ export class StreamService {
       log(`Error getting stream URL from PLS: ${error}`, 'streamService');
       return null;
     }
+  }
+
+  // Common LiveATC feed suffixes and their display names
+  private readonly FEED_SUFFIXES: Array<{ suffix: string; label: string }> = [
+    { suffix: 'twr', label: 'Tower' },
+    { suffix: 'gnd', label: 'Ground' },
+    { suffix: 'ground', label: 'Ground' },
+    { suffix: 'app', label: 'Approach' },
+    { suffix: 'app_n', label: 'Approach North' },
+    { suffix: 'app_s', label: 'Approach South' },
+    { suffix: 'app_e', label: 'Approach East' },
+    { suffix: 'app_w', label: 'Approach West' },
+    { suffix: 'dep', label: 'Departure' },
+    { suffix: 'atis', label: 'ATIS' },
+    { suffix: 'atis_arr', label: 'ATIS Arrivals' },
+    { suffix: 'atis_dep', label: 'ATIS Departures' },
+    { suffix: 'clnc', label: 'Clearance Delivery' },
+    { suffix: 'del', label: 'Clearance Delivery' },
+    { suffix: 'ctr', label: 'Center' },
+    { suffix: 'efis', label: 'EFIS' },
+    { suffix: 'ramp', label: 'Ramp' },
+    { suffix: 'unic', label: 'UNICOM' },
+  ];
+
+  /**
+   * Probe a single LiveATC .pls URL. Returns feed info if valid, null otherwise.
+   */
+  private async probeFeed(
+    url: string,
+    icao: string,
+    fallbackLabel: string
+  ): Promise<{ name: string; url: string; label: string } | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const resp = await fetch(url, { signal: controller.signal });
+      if (!resp.ok) return null;
+      const text = await resp.text();
+      const parsed = parsePlsFile(text);
+      if (!parsed || parsed.length === 0) return null;
+      // Use the Title from the PLS file if available
+      const plsTitle = parsePlsTitle(text);
+      const label = plsTitle || fallbackLabel;
+      // Use PLS title directly if it already contains the ICAO code, otherwise prefix it
+      const upperIcao = icao.toUpperCase();
+      const name = plsTitle
+        ? (plsTitle.toUpperCase().includes(upperIcao) ? plsTitle : `${upperIcao} ${plsTitle}`)
+        : `${upperIcao} ${fallbackLabel}`;
+      return { name, url, label };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Search for available LiveATC feeds for a given ICAO airport code.
+   * Probes common feed URL patterns and returns the ones that resolve.
+   */
+  async searchFeeds(icao: string): Promise<Array<{ name: string; url: string; label: string }>> {
+    const code = icao.toLowerCase().trim();
+
+    // Build list of URLs to probe: bare code + all suffixed variants
+    const probes: Array<{ url: string; label: string }> = [
+      { url: `https://www.liveatc.net/play/${code}.pls`, label: 'Combined' },
+      ...this.FEED_SUFFIXES.map(({ suffix, label }) => ({
+        url: `https://www.liveatc.net/play/${code}_${suffix}.pls`,
+        label,
+      })),
+    ];
+
+    const results = await Promise.allSettled(
+      probes.map(({ url, label }) => this.probeFeed(url, icao, label))
+    );
+
+    return results
+      .map((r) => (r.status === 'fulfilled' ? r.value : null))
+      .filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
   /**

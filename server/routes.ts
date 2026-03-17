@@ -6,6 +6,7 @@ import { streamService } from "./services/streamService";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { log } from "./vite";
+import yts from "yt-search";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Create HTTP server
@@ -170,11 +171,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Create and use stream proxy
         const proxyHandler = streamService.createStreamProxy(streamUrl);
+
+        // Mark stream as disconnected when client stops listening
+        req.on('close', () => {
+          storage.updateStream(id, { status: "disconnected" });
+        });
+
         return proxyHandler(req, res);
       }
     } catch (error) {
       log(`Error proxying stream: ${error}`, "routes");
       return res.status(500).json({ message: "Failed to proxy stream" });
+    }
+  });
+
+  // Search LiveATC feeds by airport ICAO or IATA code
+  app.get("/api/liveatc/search", async (req: Request, res: Response) => {
+    try {
+      const q = (req.query.q as string || '').trim().toUpperCase();
+      if (!q || q.length < 3 || q.length > 4) {
+        return res.status(400).json({ message: "Provide a 3-4 letter airport code" });
+      }
+
+      let feeds = await streamService.searchFeeds(q);
+
+      // If 3-letter code with no results, try prefixing with K (US IATA → ICAO)
+      if (feeds.length === 0 && q.length === 3) {
+        feeds = await streamService.searchFeeds(`K${q}`);
+      }
+
+      return res.json(feeds);
+    } catch (error) {
+      log(`Error searching feeds: ${error}`, "routes");
+      return res.status(500).json({ message: "Failed to search feeds" });
+    }
+  });
+
+  // Search YouTube videos
+  app.get("/api/youtube/search", async (req: Request, res: Response) => {
+    try {
+      const q = (req.query.q as string || '').trim();
+      if (!q) {
+        return res.status(400).json({ message: "Provide a search query" });
+      }
+      const results = await yts(q);
+      const videos = results.videos.slice(0, 12).map((v) => ({
+        name: v.title,
+        url: v.url,
+        thumbnail: v.thumbnail,
+        duration: v.timestamp,
+        author: v.author.name,
+      }));
+      return res.json(videos);
+    } catch (error) {
+      log(`Error searching YouTube: ${error}`, "routes");
+      return res.status(500).json({ message: "Failed to search YouTube" });
     }
   });
 

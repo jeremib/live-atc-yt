@@ -24,7 +24,10 @@ const isLocalStorageAvailable = (): boolean => {
 
 // Save streams to localStorage
 export const saveStreams = (streams: Stream[]): void => {
-  if (!isLocalStorageAvailable()) return;
+  if (!isLocalStorageAvailable()) {
+    console.error("LocalStorage is not available for saving streams");
+    return;
+  }
 
   try {
     // Filter out any unnecessary data from streams
@@ -35,8 +38,16 @@ export const saveStreams = (streams: Stream[]): void => {
       isPlaying: stream.isPlaying,
     }));
     
-    localStorage.setItem(STORAGE_KEYS.STREAMS, JSON.stringify(streamsToSave));
+    console.log("Serializing and saving streams to localStorage:", streamsToSave);
+    const serialized = JSON.stringify(streamsToSave);
+    console.log("Serialized data:", serialized);
+    
+    localStorage.setItem(STORAGE_KEYS.STREAMS, serialized);
     localStorage.setItem(STORAGE_KEYS.APP_VERSION, CURRENT_APP_VERSION);
+    
+    // Verify write
+    const savedData = localStorage.getItem(STORAGE_KEYS.STREAMS);
+    console.log("Verification - Data saved to localStorage:", savedData);
   } catch (error) {
     console.error('Error saving streams to localStorage:', error);
   }
@@ -73,12 +84,18 @@ export const loadSavedStreams = (): Partial<Stream>[] | null => {
     const savedVersion = localStorage.getItem(STORAGE_KEYS.APP_VERSION);
     const savedStreams = localStorage.getItem(STORAGE_KEYS.STREAMS);
     
+    console.log("Loading from localStorage - Version:", savedVersion);
+    console.log("Loading from localStorage - Saved Streams:", savedStreams);
+    
     // Ensure we're using data from the current app version
     if (savedVersion !== CURRENT_APP_VERSION || !savedStreams) {
+      console.log("No valid saved streams found in localStorage");
       return null;
     }
     
-    return JSON.parse(savedStreams);
+    const parsedStreams = JSON.parse(savedStreams);
+    console.log("Parsed streams from localStorage:", parsedStreams);
+    return parsedStreams;
   } catch (error) {
     console.error('Error loading streams from localStorage:', error);
     return null;

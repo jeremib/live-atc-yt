@@ -32,6 +32,14 @@ export function parsePlsFile(plsContent: string): string[] {
 }
 
 /**
+ * Parse a .pls file and extract the first Title entry
+ */
+export function parsePlsTitle(plsContent: string): string | null {
+  const match = plsContent.match(/^Title\d+=(.+)$/im);
+  return match ? match[1].trim() : null;
+}
+
+/**
  * Basic URL validation
  */
 function isValidUrl(url: string): boolean {

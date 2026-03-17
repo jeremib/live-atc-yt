@@ -34,12 +34,13 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<Error | null>(null);
   const [isRestoringStreams, setIsRestoringStreams] = useState(false);
+  const [hasCheckedLocalStorage, setHasCheckedLocalStorage] = useState(false);
   
   const {
     audioStates,
-    playStream,
-    pauseStream,
-    togglePlayback,
+    playStream: rawPlayStream,
+    pauseStream: rawPauseStream,
+    togglePlayback: rawTogglePlayback,
     setVolume,
     toggleMute,
     removeStream: cleanupStream,
@@ -144,53 +145,66 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     }
   };
   
+  // Wrap playStream to sync connection status
+  const playStream = async (stream: Stream) => {
+    const success = await rawPlayStream(stream);
+    if (stream.type === 'youtube') {
+      // YouTube plays client-side, no server proxy to set status
+      await updateStream(stream.id, { status: success ? 'connected' : 'error' });
+    } else {
+      // LiveATC: server sets status in /api/proxy/:id, refetch to pick it up
+      queryClient.invalidateQueries({ queryKey: ['/api/streams'] });
+    }
+    return success;
+  };
+
+  // Wrap pauseStream to update status to disconnected
+  const pauseStream = (streamId: number) => {
+    rawPauseStream(streamId);
+    updateStream(streamId, { status: 'disconnected' });
+  };
+
+  // Wrap togglePlayback to route through our wrapped play/pause
+  const togglePlayback = async (stream: Stream) => {
+    const state = getAudioState(stream.id);
+    if (state?.isPlaying) {
+      pauseStream(stream.id);
+    } else {
+      await playStream(stream);
+    }
+  };
+
   // Load saved streams from localStorage when the app first loads
   useEffect(() => {
-    if (streams.length === 0 && !isRestoringStreams && streamsLoaded) {
-      const savedStreams = loadSavedStreams();
-      
-      if (savedStreams && savedStreams.length > 0) {
-        setIsRestoringStreams(true);
-        
-        // Display toast notification
-        toast({
-          title: 'Restoring streams',
-          description: 'Restoring your previously saved streams...',
-        });
-        
-        // Add each saved stream to the database
-        const restoreStreams = async () => {
-          for (const stream of savedStreams) {
-            if (stream.name && stream.url && stream.type) {
-              await addStream(stream.name, stream.url, stream.type);
-            }
+    if (!streamsLoaded || hasCheckedLocalStorage || isRestoringStreams) return;
+
+    const savedStreams = loadSavedStreams();
+
+    if (savedStreams && savedStreams.length > 0 && streams.length === 0) {
+      setIsRestoringStreams(true);
+
+      const restoreStreams = async () => {
+        for (const stream of savedStreams) {
+          if (stream.name && stream.url && stream.type) {
+            await addStream(stream.name, stream.url, stream.type);
           }
-          
-          // Restore audio states after streams are loaded
-          const savedAudioStates = loadSavedAudioStates();
-          if (savedAudioStates) {
-            // We'll handle audio states in another effect
-          }
-          
-          setIsRestoringStreams(false);
-          
-          toast({
-            title: 'Streams restored',
-            description: 'Your streams have been restored successfully.',
-          });
-        };
-        
-        restoreStreams();
-      }
+        }
+        setIsRestoringStreams(false);
+        setHasCheckedLocalStorage(true);
+      };
+
+      restoreStreams();
+    } else {
+      setHasCheckedLocalStorage(true);
     }
-  }, [streams.length, streamsLoaded, isRestoringStreams]);
+  }, [streamsLoaded, hasCheckedLocalStorage, isRestoringStreams]);
   
   // Save streams to localStorage whenever they change
   useEffect(() => {
-    if (!isRestoringStreams && streams.length > 0) {
+    if (hasCheckedLocalStorage && !isRestoringStreams) {
       saveStreams(streams);
     }
-  }, [streams, isRestoringStreams]);
+  }, [streams, hasCheckedLocalStorage, isRestoringStreams]);
   
   // Save audio states to localStorage whenever they change
   useEffect(() => {

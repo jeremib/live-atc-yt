@@ -134,7 +134,12 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   // Remove a stream
   const removeStreamMutation = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest('DELETE', `/api/streams/${id}`);
+      try {
+        await apiRequest('DELETE', `/api/streams/${id}`);
+      } catch (err: any) {
+        // 404 is fine — stream already gone from server (e.g. after redeploy)
+        if (!err?.message?.includes('404')) throw err;
+      }
       return id;
     },
     onSuccess: (id) => {

@@ -83,7 +83,9 @@ export function YouTubePlayer({
       duration: event.target.getDuration(),
       currentTime: event.target.getCurrentTime(),
       isPlaying: event.data === 1, // 1 = playing
-      isMuted: event.target.isMuted()
+      isMuted: event.target.isMuted(),
+      filterEnabled: false,
+      filterFrequency: 3000
     };
     
     onStateChange(state);
@@ -114,7 +116,9 @@ export function YouTubePlayer({
       duration: event.target.getDuration(),
       currentTime: 0,
       isPlaying: false,
-      isMuted: event.target.isMuted()
+      isMuted: event.target.isMuted(),
+      filterEnabled: false,
+      filterFrequency: 3000
     };
     
     onStateChange(state);

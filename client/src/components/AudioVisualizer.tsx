@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useStreams } from '@/contexts/StreamContext';
 
 interface AudioVisualizerProps {
   streamId: number;
@@ -9,55 +10,110 @@ interface AudioVisualizerProps {
 }
 
 export function AudioVisualizer({ streamId, isPlaying, isError = false, errorMessage, onRetry }: AudioVisualizerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const barsRef = useRef<HTMLDivElement[]>([]);
-  
-  // Create visualization bars
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationRef = useRef<number>(0);
+  const { audioGraphs } = useStreams();
+
   useEffect(() => {
-    if (!containerRef.current || isError) return;
-    
-    // Clear previous bars
-    containerRef.current.innerHTML = '';
-    barsRef.current = [];
-    
-    // Create bars
-    const numBars = 30;
-    for (let i = 0; i < numBars; i++) {
-      const bar = document.createElement('div');
-      bar.className = 'absolute bottom-0 w-[3px] bg-primary';
-      bar.style.left = `${(i * 5) + 4}px`;
-      bar.style.height = '5px';
-      bar.style.animationDelay = `-${Math.random() * 0.9 + 0.1}s`;
-      
-      if (isPlaying) {
-        bar.style.animation = 'equalize 1s infinite';
-      }
-      
-      containerRef.current.appendChild(bar);
-      barsRef.current.push(bar);
+    const canvas = canvasRef.current;
+    if (!canvas || isError) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const graph = audioGraphs?.get(streamId);
+    const analyser = graph ? graph.getAnalyserNode() : null;
+
+    if (analyser) {
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.8;
     }
-    
+
+    const dataArray = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
+
+    const draw = () => {
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+
+      if (!isPlaying || !analyser || !dataArray) {
+        // Draw flat idle bars
+        const numBars = 32;
+        const barWidth = (width / numBars) - 1;
+        ctx.fillStyle = 'rgba(120, 120, 120, 0.15)';
+        for (let i = 0; i < numBars; i++) {
+          const x = i * (barWidth + 1);
+          ctx.fillRect(x, height - 2, barWidth, 2);
+        }
+        return;
+      }
+
+      analyser.getByteFrequencyData(dataArray);
+
+      const numBars = 32;
+      const barWidth = (width / numBars) - 1;
+      const fadePx = width * 0.15; // 15% fade on each side
+
+      for (let i = 0; i < numBars; i++) {
+        // Map bar index to frequency data (skip very low freqs, focus on voice range)
+        const dataIndex = Math.floor((i / numBars) * dataArray.length * 0.8) + 2;
+        const value = dataArray[Math.min(dataIndex, dataArray.length - 1)];
+        const barHeight = Math.max(2, (value / 255) * height * 0.9);
+
+        const x = i * (barWidth + 1);
+
+        // Calculate fade alpha based on position
+        let alpha = 1;
+        if (x < fadePx) {
+          alpha = x / fadePx;
+        } else if (x + barWidth > width - fadePx) {
+          alpha = (width - x - barWidth) / fadePx;
+        }
+        alpha = Math.max(0, Math.min(1, alpha));
+
+        // Get computed primary color or fallback
+        const style = getComputedStyle(document.documentElement);
+        const primary = style.getPropertyValue('--primary').trim();
+        ctx.fillStyle = primary
+          ? `hsla(${primary}, ${alpha})`
+          : `rgba(59, 130, 246, ${alpha})`;
+
+        ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+      }
+
+      animationRef.current = requestAnimationFrame(draw);
+    };
+
+    // Set canvas resolution to match display size
+    const resizeCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      // Reset the logical size for drawing
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    };
+
+    resizeCanvas();
+
+    if (isPlaying && analyser) {
+      const loop = () => {
+        draw();
+        animationRef.current = requestAnimationFrame(loop);
+      };
+      loop();
+    } else {
+      draw();
+    }
+
     return () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying, isError, streamId]);
-  
-  // Update animation when isPlaying changes
-  useEffect(() => {
-    if (!containerRef.current || isError) return;
-    
-    barsRef.current.forEach(bar => {
-      if (isPlaying) {
-        bar.style.animation = 'equalize 1s infinite';
-      } else {
-        bar.style.animation = 'none';
-        bar.style.height = '5px';
-      }
-    });
-  }, [isPlaying, isError]);
-  
+  }, [isPlaying, isError, streamId, audioGraphs]);
+
   if (isError) {
     return (
       <div className="rounded mt-2 mb-3 bg-red-500/10 py-2 px-3 text-red-500 text-sm flex items-center">
@@ -65,9 +121,8 @@ export function AudioVisualizer({ streamId, isPlaying, isError = false, errorMes
           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
         </svg>
         <span>{errorMessage || 'Unable to connect to stream. Try refreshing.'}</span>
-        
         {onRetry && (
-          <button 
+          <button
             onClick={onRetry}
             className="ml-auto text-primary hover:text-primary-dark text-sm flex items-center"
           >
@@ -80,18 +135,11 @@ export function AudioVisualizer({ streamId, isPlaying, isError = false, errorMes
       </div>
     );
   }
-  
+
   return (
-    <div 
-      ref={containerRef}
-      className={`h-10 relative overflow-hidden rounded mt-2 mb-3 ${isPlaying ? 'bg-primary/10' : 'bg-neutral-100'}`}
-      style={{
-        '@keyframes equalize': {
-          '0%': { height: '5px' },
-          '50%': { height: '20px' },
-          '100%': { height: '5px' }
-        }
-      }}
+    <canvas
+      ref={canvasRef}
+      className={`w-full h-10 rounded mt-2 mb-3 ${isPlaying ? 'bg-primary/5' : 'bg-neutral-100 dark:bg-neutral-700'}`}
     />
   );
 }

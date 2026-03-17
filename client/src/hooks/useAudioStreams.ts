@@ -3,10 +3,12 @@ import { Stream, AudioState } from '@/lib/types';
 import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { loadSavedAudioStates, saveAudioStates } from '@/lib/localStorage';
+import { StreamAudioGraph, getAudioContext } from '@/lib/audioGraph';
 
 export function useAudioStreams() {
   const [audioElements, setAudioElements] = useState<Map<number, HTMLAudioElement>>(new Map());
   const [audioStates, setAudioStates] = useState<Map<number, AudioState>>(new Map());
+  const [audioGraphs, setAudioGraphs] = useState<Map<number, StreamAudioGraph>>(new Map());
   const { toast } = useToast();
   
   // Function to create a new audio element for a stream
@@ -20,18 +22,27 @@ export function useAudioStreams() {
     const audio = new Audio();
     audio.preload = 'none';
     audio.crossOrigin = 'anonymous';
-    
+
+    // Create the Web Audio graph for this element.
+    // Must happen before any audio.play() call because
+    // createMediaElementSource can only be called once per element.
+    const graph = new StreamAudioGraph(audio);
+
     // Set initial audio state
     const initialState: AudioState = {
       volume: 0.8,
       duration: 0,
       currentTime: 0,
       isPlaying: false,
-      isMuted: false
+      isMuted: false,
+      filterEnabled: false,
+      filterFrequency: 3000,
+      pan: 0
     };
-    
-    // Apply initial volume
-    audio.volume = initialState.volume;
+
+    // Apply initial volume via the Web Audio gain node
+    // (MediaElementAudioSourceNode takes over the element's output)
+    graph.setGain(initialState.volume);
     
     // Set up event listeners
     audio.addEventListener('timeupdate', () => {
@@ -102,7 +113,13 @@ export function useAudioStreams() {
       newMap.set(stream.id, audio);
       return newMap;
     });
-    
+
+    setAudioGraphs(prev => {
+      const newMap = new Map(prev);
+      newMap.set(stream.id, graph);
+      return newMap;
+    });
+
     return audio;
   };
   
@@ -123,7 +140,9 @@ export function useAudioStreams() {
               duration: 0,
               currentTime: 0,
               isPlaying: true,
-              isMuted: false
+              isMuted: false,
+              filterEnabled: false,
+              filterFrequency: 3000
             });
             return newMap;
           });
@@ -159,6 +178,10 @@ export function useAudioStreams() {
         audio.src = `/api/proxy/${stream.id}`;
       }
       
+      // Resume the AudioContext if suspended (required on iOS / Safari
+      // where the context starts suspended until a user gesture).
+      await getAudioContext().resume();
+
       // Play the stream
       await audio.play();
       
@@ -264,18 +287,21 @@ export function useAudioStreams() {
         return newMap;
       });
     } 
-    // Regular audio element for LiveATC streams
+    // Regular audio element for LiveATC streams – control volume via Web Audio gain
     else if (audio) {
-      audio.volume = safeVolume;
-      
+      const graph = audioGraphs.get(streamId);
+      if (graph) {
+        graph.setGain(safeVolume);
+      }
+
       setAudioStates(prev => {
         const newMap = new Map(prev);
         const currentState = newMap.get(streamId);
         if (currentState) {
           newMap.set(streamId, {
             ...currentState,
-            volume: audio.volume,
-            isMuted: audio.volume === 0
+            volume: safeVolume,
+            isMuted: safeVolume === 0
           });
         }
         return newMap;
@@ -283,6 +309,48 @@ export function useAudioStreams() {
     }
   };
   
+  // Function to set low-pass filter on a stream
+  const setFilter = (streamId: number, enabled: boolean, frequency: number) => {
+    const graph = audioGraphs.get(streamId);
+    if (graph) {
+      if (enabled) {
+        graph.insertFilter('lowpass', frequency);
+      } else {
+        graph.removeFilter();
+      }
+    }
+
+    setAudioStates(prev => {
+      const newMap = new Map(prev);
+      const currentState = newMap.get(streamId);
+      if (currentState) {
+        newMap.set(streamId, {
+          ...currentState,
+          filterEnabled: enabled,
+          filterFrequency: frequency
+        });
+      }
+      return newMap;
+    });
+  };
+
+  // Function to set stereo pan
+  const setPan = (streamId: number, pan: number) => {
+    const graph = audioGraphs.get(streamId);
+    if (graph) {
+      graph.setPan(pan);
+    }
+
+    setAudioStates(prev => {
+      const newMap = new Map(prev);
+      const currentState = newMap.get(streamId);
+      if (currentState) {
+        newMap.set(streamId, { ...currentState, pan });
+      }
+      return newMap;
+    });
+  };
+
   // Function to toggle mute
   const toggleMute = (streamId: number) => {
     const audio = audioElements.get(streamId);
@@ -315,26 +383,27 @@ export function useAudioStreams() {
         });
       }
     }
-    // Regular audio element for LiveATC streams
+    // Regular audio element for LiveATC streams – use Web Audio gain for mute
     else if (audio && state) {
-      if (audio.volume > 0) {
-        // Store the current volume and mute
-        const currentVolume = audio.volume;
-        audio.volume = 0;
-        
+      const graph = audioGraphs.get(streamId);
+
+      if (!state.isMuted) {
+        // Mute: set gain to 0, keep the saved volume in state
+        if (graph) graph.setGain(0);
+
         setAudioStates(prev => {
           const newMap = new Map(prev);
           newMap.set(streamId, {
             ...state,
-            volume: currentVolume, // Store original volume
             isMuted: true
           });
           return newMap;
         });
       } else {
-        // Restore the previous volume
-        audio.volume = state.volume > 0 ? state.volume : 0.8;
-        
+        // Unmute: restore the saved volume
+        const restoredVolume = state.volume > 0 ? state.volume : 0.8;
+        if (graph) graph.setGain(restoredVolume);
+
         setAudioStates(prev => {
           const newMap = new Map(prev);
           newMap.set(streamId, {
@@ -349,19 +418,31 @@ export function useAudioStreams() {
   
   // Function to cleanup a stream
   const removeStream = (streamId: number) => {
+    // Disconnect the Web Audio graph before tearing down the element
+    const graph = audioGraphs.get(streamId);
+    if (graph) {
+      graph.disconnect();
+    }
+
     const audio = audioElements.get(streamId);
     if (audio) {
       audio.pause();
       audio.src = '';
       audio.load();
     }
-    
+
+    setAudioGraphs(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(streamId);
+      return newMap;
+    });
+
     setAudioElements(prev => {
       const newMap = new Map(prev);
       newMap.delete(streamId);
       return newMap;
     });
-    
+
     setAudioStates(prev => {
       const newMap = new Map(prev);
       newMap.delete(streamId);
@@ -382,7 +463,10 @@ export function useAudioStreams() {
           duration: 0, // Will be updated when audio loads
           currentTime: 0, // Will be updated when audio plays
           isPlaying: false, // Always start paused
-          isMuted: state.isMuted || false
+          isMuted: state.isMuted || false,
+          filterEnabled: state.filterEnabled || false,
+          filterFrequency: state.filterFrequency || 3000,
+          pan: state.pan || 0
         });
       });
       
@@ -398,6 +482,23 @@ export function useAudioStreams() {
     }
   }, [audioStates]);
   
+  // Reconnect a stream by resetting its src without recreating the element.
+  // The existing MediaElementAudioSourceNode graph stays intact.
+  const reconnectStream = (streamId: number) => {
+    const audio = audioElements.get(streamId);
+    if (!audio) return;
+
+    audio.pause();
+    audio.removeAttribute('src');
+    // Small delay to let the element settle before reloading
+    setTimeout(() => {
+      audio.src = `/api/proxy/${streamId}`;
+      audio.play().catch((err) => {
+        console.error('Reconnect play failed:', err);
+      });
+    }, 200);
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -407,15 +508,20 @@ export function useAudioStreams() {
       });
     };
   }, []);
-  
+
   return {
+    audioElements,
     audioStates,
+    audioGraphs,
     playStream,
     pauseStream,
     togglePlayback,
     setVolume,
     toggleMute,
+    setFilter,
+    setPan,
     removeStream,
+    reconnectStream,
     getAudioState: (streamId: number) => audioStates.get(streamId)
   };
 }

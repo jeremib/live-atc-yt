@@ -25,8 +25,10 @@ export const insertStreamSchema = createInsertSchema(streams).pick({
 export const streamUrlSchema = z.object({
   url: z.string().url()
     .or(z.string().regex(/^https?:\/\/.+\.pls$/i))
-    .or(z.string().regex(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/.+/i)),
-  type: z.enum(["liveatc", "youtube"]).default("liveatc"),
+    .or(z.string().regex(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/.+/i))
+    .or(z.string().regex(/^https?:\/\/broadcastify\.cdnstream1\.com\/.+/i))
+    .or(z.string().regex(/^https?:\/\/ice\d*\.somafm\.com\/.+/i)),
+  type: z.enum(["liveatc", "youtube", "scanner", "noaa", "railroad", "somafm"]).default("liveatc"),
 });
 
 export type Stream = typeof streams.$inferSelect;

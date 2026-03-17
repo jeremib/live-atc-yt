@@ -1,9 +1,10 @@
-import { Stream, AudioState } from './types';
+import { Stream, AudioState, Playlist } from './types';
 
 const STORAGE_KEYS = {
   STREAMS: 'liveatc_youtube_proxy_streams',
   AUDIO_STATES: 'liveatc_youtube_proxy_audio_states',
   APP_VERSION: 'liveatc_youtube_proxy_version',
+  PLAYLISTS: 'atc_playlists',
 };
 
 // Current app version - increment this when making storage format changes
@@ -67,6 +68,8 @@ export const saveAudioStates = (
         volume: state.volume,
         isMuted: state.isMuted,
         isPlaying: state.isPlaying,
+        filterEnabled: state.filterEnabled,
+        filterFrequency: state.filterFrequency,
       })
     );
     
@@ -103,11 +106,13 @@ export const loadSavedStreams = (): Partial<Stream>[] | null => {
 };
 
 // Load audio states from localStorage
-export const loadSavedAudioStates = (): { 
-  streamId: number; 
-  volume: number; 
+export const loadSavedAudioStates = (): {
+  streamId: number;
+  volume: number;
   isMuted: boolean;
   isPlaying: boolean;
+  filterEnabled: boolean;
+  filterFrequency: number;
 }[] | null => {
   if (!isLocalStorageAvailable()) return null;
 
@@ -122,6 +127,31 @@ export const loadSavedAudioStates = (): {
   } catch (error) {
     console.error('Error loading audio states from localStorage:', error);
     return null;
+  }
+};
+
+// Save playlists to localStorage
+export const savePlaylists = (playlists: Playlist[]): void => {
+  if (!isLocalStorageAvailable()) return;
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.PLAYLISTS, JSON.stringify(playlists));
+  } catch (error) {
+    console.error('Error saving playlists to localStorage:', error);
+  }
+};
+
+// Load playlists from localStorage
+export const loadPlaylists = (): Playlist[] => {
+  if (!isLocalStorageAvailable()) return [];
+
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.PLAYLISTS);
+    if (!saved) return [];
+    return JSON.parse(saved);
+  } catch (error) {
+    console.error('Error loading playlists from localStorage:', error);
+    return [];
   }
 };
 

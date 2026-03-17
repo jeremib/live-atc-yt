@@ -1,15 +1,18 @@
-import { createContext, useContext, ReactNode, useState, useEffect } from 'react';
+import { createContext, useContext, ReactNode, useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Stream } from '@/lib/types';
 import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { useAudioStreams } from '@/hooks/useAudioStreams';
-import { 
-  saveStreams, 
-  saveAudioStates, 
-  loadSavedStreams, 
-  loadSavedAudioStates 
+import { useAutoReconnect, ReconnectState } from '@/hooks/useAutoReconnect';
+import { useStreamRecorder } from '@/hooks/useStreamRecorder';
+import {
+  saveStreams,
+  saveAudioStates,
+  loadSavedStreams,
+  loadSavedAudioStates
 } from '@/lib/localStorage';
+import { useCompactMode } from '@/hooks/useCompactMode';
 
 interface StreamContextType {
   streams: Stream[];
@@ -24,7 +27,20 @@ interface StreamContextType {
   togglePlayback: (stream: Stream) => Promise<void>;
   setVolume: (streamId: number, volume: number) => void;
   toggleMute: (streamId: number) => void;
+  setFilter: (streamId: number, enabled: boolean, frequency: number) => void;
+  setPan: (streamId: number, pan: number) => void;
   getAudioState: (streamId: number) => any;
+  focusedStreamId: number | null;
+  setFocusedStreamId: (id: number | null) => void;
+  isRecording: boolean;
+  recordingStreamId: number | null;
+  recordingDuration: number;
+  startRecording: (streamId: number, streamName: string) => void;
+  stopRecording: () => void;
+  getReconnectState: (streamId: number) => ReconnectState | undefined;
+  audioGraphs: Map<number, any>;
+  isCompact: boolean;
+  toggleCompact: () => void;
 }
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -35,26 +51,63 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<Error | null>(null);
   const [isRestoringStreams, setIsRestoringStreams] = useState(false);
   const [hasCheckedLocalStorage, setHasCheckedLocalStorage] = useState(false);
+  const [focusedStreamId, setFocusedStreamId] = useState<number | null>(null);
+  const { isCompact, toggleCompact } = useCompactMode();
   
   const {
+    audioElements,
     audioStates,
+    audioGraphs,
     playStream: rawPlayStream,
     pauseStream: rawPauseStream,
     togglePlayback: rawTogglePlayback,
     setVolume,
     toggleMute,
+    setFilter,
+    setPan,
     removeStream: cleanupStream,
+    reconnectStream,
     getAudioState
   } = useAudioStreams();
-  
-  // Fetch all streams
-  const { 
-    data: streams = [], 
+
+  // Fetch all streams (moved above useAutoReconnect so streamNames is available)
+  const {
+    data: streams = [],
     isLoading,
     isSuccess: streamsLoaded
   } = useQuery<Stream[]>({
     queryKey: ['/api/streams']
   });
+
+  // Build a stream ID -> name map for notifications
+  const streamNames = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const s of streams) {
+      map.set(s.id, s.name);
+    }
+    return map;
+  }, [streams]);
+
+  const { getReconnectState } = useAutoReconnect(
+    audioElements,
+    audioGraphs,
+    audioStates,
+    reconnectStream,
+    streamNames
+  );
+
+  const {
+    isRecording,
+    recordingStreamId,
+    recordingDuration,
+    startRecording: rawStartRecording,
+    stopRecording
+  } = useStreamRecorder();
+
+  // Wrap startRecording to inject audioGraphs
+  const startRecording = (streamId: number, streamName: string) => {
+    rawStartRecording(streamId, streamName, audioGraphs);
+  };
   
   // Add a new stream
   const addStreamMutation = useMutation({
@@ -228,7 +281,20 @@ export function StreamProvider({ children }: { children: ReactNode }) {
         togglePlayback,
         setVolume,
         toggleMute,
-        getAudioState
+        setFilter,
+        setPan,
+        getAudioState,
+        focusedStreamId,
+        setFocusedStreamId,
+        isRecording,
+        recordingStreamId,
+        recordingDuration,
+        startRecording,
+        stopRecording,
+        getReconnectState,
+        audioGraphs,
+        isCompact,
+        toggleCompact
       }}
     >
       {children}

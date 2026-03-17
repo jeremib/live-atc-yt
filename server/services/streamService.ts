@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import { parsePlsFile, parsePlsTitle } from '../utils/plsParser';
+import { TTLCache } from '../utils/cache';
 import { log } from '../vite';
 
 /**
@@ -8,6 +9,9 @@ import { log } from '../vite';
 export class StreamService {
   // Store active stream proxies
   private activeProxies = new Map<number, any>();
+
+  // Cache search results for 10 minutes to avoid repeated probing
+  private feedCache = new TTLCache<Array<{ name: string; url: string; label: string }>>(10 * 60 * 1000);
 
   /**
    * Fetch the audio stream URL from a .pls file
@@ -97,6 +101,12 @@ export class StreamService {
   async searchFeeds(icao: string): Promise<Array<{ name: string; url: string; label: string }>> {
     const code = icao.toLowerCase().trim();
 
+    const cached = this.feedCache.get(code);
+    if (cached) {
+      log(`Cache hit for feed search: ${code}`, 'streamService');
+      return cached;
+    }
+
     // Build list of URLs to probe: bare code + all suffixed variants
     const probes: Array<{ url: string; label: string }> = [
       { url: `https://www.liveatc.net/play/${code}.pls`, label: 'Combined' },
@@ -110,9 +120,12 @@ export class StreamService {
       probes.map(({ url, label }) => this.probeFeed(url, icao, label))
     );
 
-    return results
+    const feeds = results
       .map((r) => (r.status === 'fulfilled' ? r.value : null))
       .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    this.feedCache.set(code, feeds);
+    return feeds;
   }
 
   /**

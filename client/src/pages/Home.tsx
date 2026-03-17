@@ -3,12 +3,17 @@ import { Header } from '@/components/Header';
 import { StreamGrid } from '@/components/StreamGrid';
 import { AddStreamModal } from '@/components/AddStreamModal';
 import { useStreams } from '@/contexts/StreamContext';
+import { useMediaSession } from '@/hooks/useMediaSession';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 
 export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isServerConnected, setIsServerConnected] = useState(false);
-  
-  const { streams, isLoading } = useStreams();
+
+  const { streams, isLoading, audioStates, togglePlayback, pauseStream, toggleMute, focusedStreamId, setFocusedStreamId } = useStreams();
+
+  useMediaSession({ streams, audioStates, togglePlayback, pauseStream });
+  useKeyboardShortcuts({ streams, focusedStreamId, togglePlayback, toggleMute, setFocusedStreamId });
   
   // Check server connectivity
   useEffect(() => {
@@ -35,7 +40,7 @@ export default function Home() {
   const closeModal = () => setIsModalOpen(false);
   
   return (
-    <div className="bg-neutral-100 min-h-screen">
+    <div className="bg-neutral-100 dark:bg-neutral-900 min-h-screen">
       <Header isConnected={isServerConnected} onAddStreamClick={openModal} />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

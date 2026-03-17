@@ -8,7 +8,22 @@ import { log } from '../vite';
 function getProxyAgent(): HttpsProxyAgent<string> | undefined {
   const proxyUrl = process.env.BRIGHTDATA_PROXY_URL;
   if (!proxyUrl) return undefined;
-  return new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
+  return new HttpsProxyAgent(proxyUrl);
+}
+
+// Fetch through the proxy, temporarily disabling TLS verification
+// for the proxy's self-signed CONNECT tunnel certificate.
+async function proxyFetch(url: string, opts: any = {}) {
+  const agent = getProxyAgent();
+  if (!agent) return fetch(url, opts);
+  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  try {
+    return await fetch(url, { ...opts, agent });
+  } finally {
+    if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
+  }
 }
 
 /**
@@ -27,13 +42,11 @@ export class StreamService {
    */
   async getStreamUrlFromPls(plsUrl: string): Promise<string | null> {
     try {
-      const agent = getProxyAgent();
-      const response = await fetch(plsUrl, {
+      const response = await proxyFetch(plsUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': '*/*',
         },
-        ...(agent && { agent }),
       });
 
       if (!response.ok) {
@@ -89,11 +102,9 @@ export class StreamService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const agent = getProxyAgent();
-      const resp = await fetch(url, {
+      const resp = await proxyFetch(url, {
         signal: controller.signal,
         headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-        ...(agent && { agent }),
       });
       if (!resp.ok) return null;
       const text = await resp.text();

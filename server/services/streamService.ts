@@ -8,7 +8,7 @@ import { log } from '../vite';
 function getProxyAgent(): HttpsProxyAgent<string> | undefined {
   const proxyUrl = process.env.BRIGHTDATA_PROXY_URL;
   if (!proxyUrl) return undefined;
-  return new HttpsProxyAgent(proxyUrl);
+  return new HttpsProxyAgent(proxyUrl, { rejectUnauthorized: false });
 }
 
 /**

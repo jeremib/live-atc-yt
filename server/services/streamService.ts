@@ -1,30 +1,6 @@
 import fetch from 'node-fetch';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { parsePlsFile, parsePlsTitle } from '../utils/plsParser';
 import { TTLCache } from '../utils/cache';
 import { log } from '../vite';
-
-// Bright Data residential proxy for LiveATC requests
-function getProxyAgent(): HttpsProxyAgent<string> | undefined {
-  const proxyUrl = process.env.BRIGHTDATA_PROXY_URL;
-  if (!proxyUrl) return undefined;
-  return new HttpsProxyAgent(proxyUrl);
-}
-
-// Fetch through the proxy, temporarily disabling TLS verification
-// for the proxy's self-signed CONNECT tunnel certificate.
-async function proxyFetch(url: string, opts: any = {}) {
-  const agent = getProxyAgent();
-  if (!agent) return fetch(url, opts);
-  const prev = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  try {
-    return await fetch(url, { ...opts, agent });
-  } finally {
-    if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
-  }
-}
 
 /**
  * Service to handle fetching and managing audio streams
@@ -37,37 +13,25 @@ export class StreamService {
   private feedCache = new TTLCache<Array<{ name: string; url: string; label: string }>>(10 * 60 * 1000);
 
   /**
-   * Fetch the audio stream URL from a .pls file
-   * @param plsUrl URL to a .pls file
+   * Derive the audio stream URL from a .pls URL without fetching it.
+   * LiveATC PLS URLs follow a predictable pattern:
+   *   https://www.liveatc.net/play/katl_twr.pls → https://d.liveatc.net/katl_twr
    */
   async getStreamUrlFromPls(plsUrl: string): Promise<string | null> {
     try {
-      const response = await proxyFetch(plsUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': 'https://www.liveatc.net/',
-          'Origin': 'https://www.liveatc.net',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch PLS file: ${response.status} ${response.statusText}`);
+      // Extract the feed name from the PLS URL
+      const match = plsUrl.match(/\/play\/(.+)\.pls$/i);
+      if (match && match[1]) {
+        const feedName = match[1];
+        const streamUrl = `https://d.liveatc.net/${feedName}`;
+        log(`Derived stream URL: ${streamUrl} from PLS: ${plsUrl}`, 'streamService');
+        return streamUrl;
       }
 
-      const plsContent = await response.text();
-      log(`PLS content from ${plsUrl}: ${plsContent.substring(0, 200)}`, 'streamService');
-      const streamUrls = parsePlsFile(plsContent);
-
-      if (!streamUrls || streamUrls.length === 0) {
-        throw new Error(`No valid stream URLs found in PLS file. Content: ${plsContent.substring(0, 200)}`);
-      }
-
-      // Return the first stream URL (most PLS files only have one)
-      return streamUrls[0];
+      log(`Could not extract feed name from PLS URL: ${plsUrl}`, 'streamService');
+      return null;
     } catch (error) {
-      log(`Error getting stream URL from PLS: ${error}`, 'streamService');
+      log(`Error deriving stream URL from PLS: ${error}`, 'streamService');
       return null;
     }
   }
@@ -95,7 +59,8 @@ export class StreamService {
   ];
 
   /**
-   * Probe a single LiveATC .pls URL. Returns feed info if valid, null otherwise.
+   * Probe a LiveATC feed by checking if the CDN stream URL responds.
+   * Uses HEAD request to d.liveatc.net to avoid downloading audio data.
    */
   private async probeFeed(
     url: string,
@@ -105,28 +70,25 @@ export class StreamService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      const resp = await proxyFetch(url, {
+      // Derive CDN URL from PLS URL
+      const match = url.match(/\/play\/(.+)\.pls$/i);
+      if (!match) return null;
+      const feedName = match[1];
+      const cdnUrl = `https://d.liveatc.net/${feedName}`;
+
+      // Check if the stream exists with a HEAD request
+      const resp = await fetch(cdnUrl, {
+        method: 'HEAD',
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': 'https://www.liveatc.net/',
         },
       });
       if (!resp.ok) return null;
-      const text = await resp.text();
-      const parsed = parsePlsFile(text);
-      if (!parsed || parsed.length === 0) return null;
-      // Use the Title from the PLS file if available
-      const plsTitle = parsePlsTitle(text);
-      const label = plsTitle || fallbackLabel;
-      // Use PLS title directly if it already contains the ICAO code, otherwise prefix it
+
       const upperIcao = icao.toUpperCase();
-      const name = plsTitle
-        ? (plsTitle.toUpperCase().includes(upperIcao) ? plsTitle : `${upperIcao} ${plsTitle}`)
-        : `${upperIcao} ${fallbackLabel}`;
-      return { name, url, label };
+      const name = `${upperIcao} ${fallbackLabel}`;
+      return { name, url, label: fallbackLabel };
     } catch {
       return null;
     } finally {

@@ -292,7 +292,7 @@ export function Header({ isConnected, onAddStreamClick }: HeaderProps) {
           <div className="flex items-center">
             <div className="flex items-center">
               <FaHeadset className="text-white text-2xl mr-3" />
-              <h1 className="text-white text-xl font-semibold">LiveATC Stream Hub</h1>
+              <h1 className="text-white text-xl font-semibold">AudioStream Hub</h1>
             </div>
             <div className="ml-6 hidden md:flex items-center text-sm text-white/80">
               <span className={`mr-2 ${isConnected ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'} px-2 py-1 rounded-full flex items-center`}>

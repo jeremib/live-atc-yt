@@ -474,13 +474,13 @@ export function AddStreamModal({ isOpen, onClose }: AddStreamModalProps) {
           onValueChange={(value) => setActiveTab(value as TabType)}
           className="w-full"
         >
-          <TabsList className="flex w-full overflow-x-auto">
-            <TabsTrigger value="liveatc" className="flex-1 text-xs">LiveATC</TabsTrigger>
-            <TabsTrigger value="scanner" className="flex-1 text-xs">Scanner</TabsTrigger>
-            <TabsTrigger value="noaa" className="flex-1 text-xs">NOAA</TabsTrigger>
-            <TabsTrigger value="railroad" className="flex-1 text-xs">Railroad</TabsTrigger>
-            <TabsTrigger value="somafm" className="flex-1 text-xs">SomaFM</TabsTrigger>
-            <TabsTrigger value="youtube" className="flex-1 text-xs">YouTube</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 h-auto gap-1">
+            <TabsTrigger value="liveatc" className="text-xs">LiveATC</TabsTrigger>
+            <TabsTrigger value="scanner" className="text-xs">Scanner</TabsTrigger>
+            <TabsTrigger value="noaa" className="text-xs">NOAA</TabsTrigger>
+            <TabsTrigger value="railroad" className="text-xs">Railroad</TabsTrigger>
+            <TabsTrigger value="somafm" className="text-xs">SomaFM</TabsTrigger>
+            <TabsTrigger value="youtube" className="text-xs">YouTube</TabsTrigger>
           </TabsList>
 
           <TabsContent value="liveatc">

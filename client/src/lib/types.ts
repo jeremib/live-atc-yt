@@ -1,10 +1,15 @@
 // Stream types
-export type StreamType = 'liveatc' | 'youtube' | 'scanner' | 'noaa' | 'railroad' | 'somafm';
+export type StreamType = 'liveatc' | 'youtube' | 'scanner' | 'noaa' | 'railroad' | 'somafm' | 'suno';
 
 // Stream statuses
 export type StreamStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 // Stream interface
+export interface SunoTrack {
+  title: string;
+  audioUrl: string;
+}
+
 export interface Stream {
   id: number;
   name: string;
@@ -14,6 +19,8 @@ export interface Stream {
   status: StreamStatus;
   isPlaying: boolean;
   createdAt: string;
+  sunoTracks?: SunoTrack[];
+  sunoCurrentTrack?: number;
 }
 
 // Audio player state

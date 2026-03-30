@@ -9,6 +9,8 @@ export function useAudioStreams() {
   const [audioStates, setAudioStates] = useState<Map<number, AudioState>>(new Map());
   const [audioGraphs, setAudioGraphs] = useState<Map<number, StreamAudioGraph>>(new Map());
   const { toast } = useToast();
+  // Callback ref for when a Suno track finishes — StreamContext sets this
+  const onSunoTrackEndRef = useRef<((streamId: number) => void) | null>(null);
   
   // Function to create a new audio element for a stream
   const createAudioElement = (stream: Stream) => {
@@ -99,7 +101,14 @@ export function useAudioStreams() {
         variant: 'destructive'
       });
     });
-    
+
+    // Auto-advance for Suno playlists when a track ends
+    audio.addEventListener('ended', () => {
+      if (audio.dataset.streamType === 'suno' && onSunoTrackEndRef.current) {
+        onSunoTrackEndRef.current(stream.id);
+      }
+    });
+
     // Update audio states and elements
     setAudioStates(prev => {
       const newMap = new Map(prev);
@@ -173,10 +182,18 @@ export function useAudioStreams() {
       
       // Set the source if not already set
       if (!audio.src) {
-        // Use our proxy endpoint with URL as query param
-        const proxyUrl = `/api/proxy?url=${encodeURIComponent(stream.url)}&type=${stream.type}`;
-        audio.src = proxyUrl;
-        audio.dataset.proxyUrl = proxyUrl;
+        if (stream.type === 'suno' && stream.sunoTracks && stream.sunoTracks.length > 0) {
+          // Suno CDN URLs play directly — no proxy needed
+          const trackIndex = stream.sunoCurrentTrack ?? 0;
+          audio.src = stream.sunoTracks[trackIndex].audioUrl;
+          audio.dataset.streamType = 'suno';
+          audio.dataset.streamId = String(stream.id);
+        } else {
+          // Use our proxy endpoint with URL as query param
+          const proxyUrl = `/api/proxy?url=${encodeURIComponent(stream.url)}&type=${stream.type}`;
+          audio.src = proxyUrl;
+          audio.dataset.proxyUrl = proxyUrl;
+        }
       }
       
       // Resume the AudioContext if suspended (required on iOS / Safari
@@ -510,6 +527,14 @@ export function useAudioStreams() {
     };
   }, []);
 
+  // Play a specific Suno track by index on an existing audio element
+  const playSunoTrack = (streamId: number, audioUrl: string) => {
+    const audio = audioElements.get(streamId);
+    if (!audio) return;
+    audio.src = audioUrl;
+    audio.play().catch(err => console.error('Suno track play failed:', err));
+  };
+
   return {
     audioElements,
     audioStates,
@@ -523,6 +548,8 @@ export function useAudioStreams() {
     setPan,
     removeStream,
     reconnectStream,
+    playSunoTrack,
+    onSunoTrackEndRef,
     getAudioState: (streamId: number) => audioStates.get(streamId)
   };
 }

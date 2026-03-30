@@ -31,6 +31,7 @@ export const saveStreams = (streams: Stream[]): void => {
       url: stream.url,
       type: stream.type,
       fileName: stream.fileName,
+      ...(stream.sunoTracks ? { sunoTracks: stream.sunoTracks } : {}),
     }));
 
     localStorage.setItem(STORAGE_KEYS.STREAMS, JSON.stringify(streamsToSave));
@@ -70,6 +71,7 @@ export const loadStreams = (): Stream[] => {
       status: 'disconnected' as const,
       isPlaying: false,
       createdAt: new Date().toISOString(),
+      ...(s.sunoTracks ? { sunoTracks: s.sunoTracks, sunoCurrentTrack: 0 } : {}),
     }));
   } catch (error) {
     console.error('Error loading streams from localStorage:', error);

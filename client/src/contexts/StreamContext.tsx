@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode, useState, useMemo, useCallback } from 'react';
+import { createContext, useContext, ReactNode, useState, useMemo, useCallback, useEffect } from 'react';
 import { Stream, StreamType } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAudioStreams } from '@/hooks/useAudioStreams';
@@ -60,6 +60,10 @@ function deriveFileName(url: string, type: string): string | undefined {
     const match = url.match(/(?:v=|\/)([\w-]{11})(?:[^#&?]*)/);
     return match ? `video-${match[1]}` : 'youtube-video';
   }
+  if (type === 'suno') {
+    const match = url.match(/playlist\/([\w-]+)/);
+    return match ? `suno-${match[1]}` : 'suno-playlist';
+  }
   return undefined;
 }
 
@@ -82,8 +86,40 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     setPan,
     removeStream: cleanupStream,
     reconnectStream,
+    playSunoTrack,
+    onSunoTrackEndRef,
     getAudioState
   } = useAudioStreams();
+
+  // Wire up Suno auto-advance: when a track ends, advance to the next one
+  useEffect(() => {
+    onSunoTrackEndRef.current = (streamId: number) => {
+      setStreams(prev => {
+        const stream = prev.find(s => s.id === streamId);
+        if (!stream?.sunoTracks) return prev;
+
+        const currentIdx = stream.sunoCurrentTrack ?? 0;
+        const nextIdx = currentIdx + 1;
+
+        if (nextIdx >= stream.sunoTracks.length) {
+          // Playlist finished — loop back to start
+          const next = prev.map(s =>
+            s.id === streamId ? { ...s, sunoCurrentTrack: 0 } : s
+          );
+          saveStreams(next);
+          playSunoTrack(streamId, stream.sunoTracks[0].audioUrl);
+          return next;
+        }
+
+        const next = prev.map(s =>
+          s.id === streamId ? { ...s, sunoCurrentTrack: nextIdx } : s
+        );
+        saveStreams(next);
+        playSunoTrack(streamId, stream.sunoTracks[nextIdx].audioUrl);
+        return next;
+      });
+    };
+  }, [playSunoTrack]);
 
   const streamNames = useMemo(() => {
     const map = new Map<number, string>();

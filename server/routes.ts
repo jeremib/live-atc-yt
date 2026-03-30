@@ -108,6 +108,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Fetch Suno playlist tracks
+  app.get("/api/suno/playlist", async (req: Request, res: Response) => {
+    try {
+      const url = req.query.url as string;
+      if (!url) {
+        return res.status(400).json({ message: "Missing url parameter" });
+      }
+
+      // Extract playlist ID from various URL formats
+      const match = url.match(/suno\.com\/playlist\/([\w-]+)/);
+      if (!match) {
+        return res.status(400).json({ message: "Invalid Suno playlist URL" });
+      }
+
+      const playlistUrl = `https://suno.com/playlist/${match[1]}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      const resp = await fetch(playlistUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+      clearTimeout(timeout);
+
+      if (!resp.ok) {
+        return res.status(resp.status).json({ message: "Failed to fetch Suno playlist" });
+      }
+
+      const html = await resp.text();
+
+      // Extract playlist name from og:title
+      const titleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/);
+      const playlistName = titleMatch ? titleMatch[1] : 'Suno Playlist';
+
+      // Extract audio URLs from og:audio meta tags
+      const audioMatches = [...html.matchAll(/<meta\s+property="og:audio"\s+content="([^"]+)"/g)];
+      if (audioMatches.length === 0) {
+        return res.status(404).json({ message: "No tracks found in playlist" });
+      }
+
+      // Extract song titles from title attributes on song row spans
+      const titleMatches = [...html.matchAll(/font-sans text-base font-medium[^"]*"\s+title="([^"]+)"/g)];
+
+      // Build tracks list pairing og:audio URLs with extracted titles
+      const tracks = audioMatches.map((m, i) => {
+        const audioUrl = m[1];
+        // Decode HTML entities in the title
+        const rawTitle = titleMatches[i]?.[1] || `Track ${i + 1}`;
+        const title = rawTitle.replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+        return { title, audioUrl };
+      });
+
+      return res.json({
+        name: playlistName,
+        tracks,
+      });
+    } catch (error) {
+      log(`Error fetching Suno playlist: ${error}`, "routes");
+      return res.status(500).json({ message: "Failed to fetch Suno playlist" });
+    }
+  });
+
   // Get airport metadata by ICAO code
   app.get("/api/airports/:icao", async (req: Request, res: Response) => {
     const icao = req.params.icao.toUpperCase();

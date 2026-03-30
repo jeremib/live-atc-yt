@@ -106,7 +106,12 @@ interface SomaFmFeed {
   listeners?: number;
 }
 
-type TabType = 'liveatc' | 'scanner' | 'noaa' | 'railroad' | 'somafm' | 'youtube';
+interface SunoPlaylistResult {
+  name: string;
+  tracks: Array<{ title: string; audioUrl: string }>;
+}
+
+type TabType = 'liveatc' | 'scanner' | 'noaa' | 'railroad' | 'somafm' | 'youtube' | 'suno';
 
 interface AddStreamModalProps {
   isOpen: boolean;
@@ -142,7 +147,7 @@ interface YouTubeResult {
 }
 
 export function AddStreamModal({ isOpen, onClose }: AddStreamModalProps) {
-  const { addStream } = useStreams();
+  const { addStream, updateStream } = useStreams();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('liveatc');
@@ -172,6 +177,11 @@ export function AddStreamModal({ isOpen, onClose }: AddStreamModalProps) {
   const [somafmFilter, setSomafmFilter] = useState('');
   const [somafmFeeds, setSomafmFeeds] = useState<SomaFmFeed[]>([]);
   const [isSomafmLoading, setIsSomafmLoading] = useState(false);
+
+  // Suno state
+  const [sunoUrl, setSunoUrl] = useState('');
+  const [sunoPlaylist, setSunoPlaylist] = useState<SunoPlaylistResult | null>(null);
+  const [isSunoLoading, setIsSunoLoading] = useState(false);
 
   // Form validation schema
   const formSchema = z.object({
@@ -346,6 +356,56 @@ export function AddStreamModal({ isOpen, onClose }: AddStreamModalProps) {
     }
   };
 
+  // Fetch Suno playlist
+  const handleSunoFetch = async () => {
+    const url = sunoUrl.trim();
+    if (!url.includes('suno.com/playlist/')) {
+      toast({
+        title: 'Invalid URL',
+        description: 'Enter a Suno playlist URL (e.g. https://suno.com/playlist/...)',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsSunoLoading(true);
+    setSunoPlaylist(null);
+    try {
+      const resp = await fetch(`/api/suno/playlist?url=${encodeURIComponent(url)}`);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: 'Failed to fetch' }));
+        throw new Error(err.message);
+      }
+      const data: SunoPlaylistResult = await resp.json();
+      setSunoPlaylist(data);
+      if (data.tracks.length === 0) {
+        toast({ title: 'No tracks', description: 'Playlist appears empty.' });
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err.message || 'Could not fetch Suno playlist.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSunoLoading(false);
+    }
+  };
+
+  // Add a Suno playlist as a stream
+  const handleAddSunoPlaylist = () => {
+    if (!sunoPlaylist || sunoPlaylist.tracks.length === 0) return;
+    const stream = addStream(sunoPlaylist.name, sunoUrl.trim(), 'suno');
+    // Attach tracks to the stream
+    updateStream(stream.id, {
+      sunoTracks: sunoPlaylist.tracks,
+      sunoCurrentTrack: 0,
+    });
+    toast({ title: 'Playlist Added', description: `${sunoPlaylist.name} (${sunoPlaylist.tracks.length} tracks)` });
+    setSunoPlaylist(null);
+    setSunoUrl('');
+    onClose();
+  };
+
   // Handle form submission
   const onSubmit = async (formData: AddStreamFormData) => {
     setIsLoading(true);
@@ -474,13 +534,14 @@ export function AddStreamModal({ isOpen, onClose }: AddStreamModalProps) {
           onValueChange={(value) => setActiveTab(value as TabType)}
           className="w-full"
         >
-          <TabsList className="grid w-full grid-cols-3 h-auto gap-1">
+          <TabsList className="grid w-full grid-cols-4 h-auto gap-1">
             <TabsTrigger value="liveatc" className="text-xs">LiveATC</TabsTrigger>
             <TabsTrigger value="scanner" className="text-xs">Scanner</TabsTrigger>
             <TabsTrigger value="noaa" className="text-xs">NOAA</TabsTrigger>
             <TabsTrigger value="railroad" className="text-xs">Railroad</TabsTrigger>
             <TabsTrigger value="somafm" className="text-xs">SomaFM</TabsTrigger>
             <TabsTrigger value="youtube" className="text-xs">YouTube</TabsTrigger>
+            <TabsTrigger value="suno" className="text-xs">Suno</TabsTrigger>
           </TabsList>
 
           <TabsContent value="liveatc">
@@ -878,6 +939,57 @@ export function AddStreamModal({ isOpen, onClose }: AddStreamModalProps) {
                       </Button>
                     ))}
                   </div>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+          <TabsContent value="suno">
+            <div className="space-y-4 pt-4">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Suno Playlist URL</label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://suno.com/playlist/..."
+                    value={sunoUrl}
+                    onChange={(e) => setSunoUrl(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleSunoFetch())}
+                  />
+                  <Button
+                    type="button"
+                    onClick={handleSunoFetch}
+                    disabled={isSunoLoading}
+                  >
+                    {isSunoLoading ? 'Loading...' : 'Fetch'}
+                  </Button>
+                </div>
+              </div>
+
+              {sunoPlaylist && (
+                <div>
+                  <div className="mb-2 px-3 py-2 bg-neutral-50 rounded-md border border-neutral-200">
+                    <div className="font-semibold text-sm text-neutral-800">
+                      {sunoPlaylist.name}
+                    </div>
+                    <div className="text-xs text-neutral-500">
+                      {sunoPlaylist.tracks.length} track{sunoPlaylist.tracks.length !== 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto mb-3">
+                    {sunoPlaylist.tracks.map((track, i) => (
+                      <div key={i} className="text-xs px-2 py-1 bg-neutral-50 rounded flex items-center gap-2">
+                        <span className="text-neutral-400 font-mono w-5 text-right shrink-0">{i + 1}</span>
+                        <span className="truncate">{track.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={handleAddSunoPlaylist}
+                    disabled={isLoading}
+                  >
+                    <FaPlus className="mr-2 h-4 w-4" />
+                    Add Playlist
+                  </Button>
                 </div>
               )}
             </div>

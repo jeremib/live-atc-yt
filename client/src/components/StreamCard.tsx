@@ -290,7 +290,9 @@ export function StreamCard({ stream, index }: StreamCardProps) {
             <h3 className="font-semibold text-neutral-800 dark:text-neutral-100">{stream.name}</h3>
             {!isCompact && (
               <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                {airportInfo ? `${airportInfo.name} — ${airportInfo.city}` : (stream.fileName || 'Unknown file')}
+                {stream.type === 'suno' && stream.sunoTracks
+                  ? `Track ${(stream.sunoCurrentTrack ?? 0) + 1}/${stream.sunoTracks.length}: ${stream.sunoTracks[stream.sunoCurrentTrack ?? 0]?.title ?? ''}`
+                  : airportInfo ? `${airportInfo.name} — ${airportInfo.city}` : (stream.fileName || 'Unknown file')}
               </p>
             )}
           </div>
@@ -506,6 +508,7 @@ export function StreamCard({ stream, index }: StreamCardProps) {
                 : stream.type === 'noaa' ? 'Source: NOAA Weather Radio / Format: MP3'
                 : stream.type === 'railroad' ? 'Source: Broadcastify / Format: MP3'
                 : stream.type === 'somafm' ? 'Source: SomaFM / Format: MP3'
+                : stream.type === 'suno' ? `Source: Suno / ${stream.sunoTracks?.length ?? 0} tracks`
                 : 'Source: www.liveatc.net / Format: MP3'}
             </div>
           )}

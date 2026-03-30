@@ -59,8 +59,9 @@ export class StreamService {
   ];
 
   /**
-   * Probe a LiveATC feed by checking if the CDN stream URL responds.
-   * Uses HEAD request to d.liveatc.net to avoid downloading audio data.
+   * Probe a LiveATC feed by checking if the PLS file exists.
+   * The CDN (d.liveatc.net) is behind Cloudflare bot protection, so we
+   * probe the PLS file on www.liveatc.net instead — a 200 means the feed exists.
    */
   private async probeFeed(
     url: string,
@@ -70,25 +71,16 @@ export class StreamService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-      // Derive CDN URL from PLS URL
-      const match = url.match(/\/play\/(.+)\.pls$/i);
-      if (!match) return null;
-      const feedName = match[1];
-      const cdnUrl = `https://d.liveatc.net/${feedName}`;
-
-      // Check if the stream exists with a HEAD request
-      // Use redirect: 'manual' because the CDN returns 302 to the actual
-      // stream server — a redirect means the feed exists.
-      const resp = await fetch(cdnUrl, {
-        method: 'HEAD',
-        redirect: 'manual',
+      // Use GET instead of HEAD — LiveATC blocks HEAD requests.
+      // PLS files are tiny (<200 bytes) so the overhead is negligible.
+      const resp = await fetch(url, {
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Referer': 'https://www.liveatc.net/',
         },
       });
-      if (!resp.ok && !(resp.status >= 300 && resp.status < 400)) return null;
+      if (!resp.ok) return null;
 
       const upperIcao = icao.toUpperCase();
       const name = `${upperIcao} ${fallbackLabel}`;

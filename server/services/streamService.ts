@@ -77,14 +77,18 @@ export class StreamService {
       const cdnUrl = `https://d.liveatc.net/${feedName}`;
 
       // Check if the stream exists with a HEAD request
+      // Use redirect: 'manual' because the CDN returns 302 to the actual
+      // stream server — a redirect means the feed exists.
       const resp = await fetch(cdnUrl, {
         method: 'HEAD',
+        redirect: 'manual',
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://www.liveatc.net/',
         },
       });
-      if (!resp.ok) return null;
+      if (!resp.ok && !(resp.status >= 300 && resp.status < 400)) return null;
 
       const upperIcao = icao.toUpperCase();
       const name = `${upperIcao} ${fallbackLabel}`;
@@ -169,7 +173,10 @@ export class StreamService {
         // don't block datacenter IPs, and routing continuous audio through the
         // residential proxy would be expensive per-GB.
         const streamResponse = await fetch(streamUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.liveatc.net/',
+          },
         });
         
         if (!streamResponse.ok) {

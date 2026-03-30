@@ -69,7 +69,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   // API Routes
-  
+
+  // App version — generated once at server startup
+  const serverVersion = Date.now().toString(36);
+  app.get("/api/version", (_req: Request, res: Response) => {
+    res.json({ version: serverVersion });
+  });
+
   // Get all streams
   app.get("/api/streams", async (req: Request, res: Response) => {
     try {

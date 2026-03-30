@@ -4,7 +4,12 @@ import themePlugin from "@replit/vite-plugin-shadcn-theme-json";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
+const buildHash = Date.now().toString(36);
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(buildHash),
+  },
   plugins: [
     react(),
     runtimeErrorOverlay(),

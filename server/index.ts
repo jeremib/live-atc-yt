@@ -57,7 +57,7 @@ app.use((req, res, next) => {
   }
 
   // this serves both the API and the client.
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "5001", 10);
   server.listen({
     port,
     host: "0.0.0.0",

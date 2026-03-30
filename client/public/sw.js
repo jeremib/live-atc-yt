@@ -2,8 +2,6 @@
 
 const CACHE_NAME = 'audiostream-hub-v1';
 const urlsToCache = [
-  '/',
-  '/index.html',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png'
@@ -11,64 +9,46 @@ const urlsToCache = [
 
 // Install event - cache the essential files
 self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
+      .then(cache => cache.addAll(urlsToCache))
   );
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches and take control immediately
 self.addEventListener('activate', event => {
-  const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName);
-          }
-        })
+        cacheNames
+          .filter(name => name !== CACHE_NAME)
+          .map(name => caches.delete(name))
       );
-    })
+    }).then(() => self.clients.claim())
   );
 });
 
-// Fetch event - serve from cache if available, otherwise fetch from network
+// Fetch event - network-first for HTML, cache-first for static assets
 self.addEventListener('fetch', event => {
-  // Skip for API and streaming requests
-  if (event.request.url.includes('/api/') || 
+  // Skip API and streaming requests entirely
+  if (event.request.url.includes('/api/') ||
       event.request.url.includes('/proxy/')) {
     return;
   }
 
+  // Navigation requests (HTML pages) — always go to network first
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  // Static assets — cache-first
   event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        // Cache hit - return response
-        if (response) {
-          return response;
-        }
-        return fetch(event.request).then(
-          response => {
-            // Check if we received a valid response
-            if (!response || response.status !== 200 || response.type !== 'basic') {
-              return response;
-            }
-
-            // Clone the response - the response is a stream and can only be consumed once
-            const responseToCache = response.clone();
-
-            caches.open(CACHE_NAME)
-              .then(cache => {
-                cache.put(event.request, responseToCache);
-              });
-
-            return response;
-          }
-        );
-      })
+    caches.match(event.request).then(cached => {
+      return cached || fetch(event.request);
+    })
   );
 });

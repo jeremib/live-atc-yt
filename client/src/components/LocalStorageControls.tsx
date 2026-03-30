@@ -13,19 +13,24 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { clearSavedData } from '@/lib/localStorage';
+import { useStreams } from '@/contexts/StreamContext';
 import { useToast } from '@/hooks/use-toast';
 
 export function LocalStorageControls() {
   const { toast } = useToast();
+  const { streams, removeStream } = useStreams();
   const [isOpen, setIsOpen] = useState(false);
-  
-  const handleClearSavedData = () => {
-    clearSavedData();
+
+  const handleClearSavedData = async () => {
     setIsOpen(false);
-    
+    clearSavedData();
+
+    // Remove all streams from the server so the save effect doesn't re-persist them
+    await Promise.all(streams.map(s => removeStream(s.id)));
+
     toast({
       title: 'Data cleared',
-      description: 'Your saved streams have been cleared. Refresh the page to start fresh.',
+      description: 'All streams have been removed.',
     });
   };
   

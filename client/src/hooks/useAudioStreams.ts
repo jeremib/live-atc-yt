@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { Stream, AudioState } from '@/lib/types';
-import { apiRequest } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { loadSavedAudioStates, saveAudioStates } from '@/lib/localStorage';
 import { StreamAudioGraph, getAudioContext } from '@/lib/audioGraph';
@@ -174,8 +173,10 @@ export function useAudioStreams() {
       
       // Set the source if not already set
       if (!audio.src) {
-        // Use our proxy endpoint
-        audio.src = `/api/proxy/${stream.id}`;
+        // Use our proxy endpoint with URL as query param
+        const proxyUrl = `/api/proxy?url=${encodeURIComponent(stream.url)}&type=${stream.type}`;
+        audio.src = proxyUrl;
+        audio.dataset.proxyUrl = proxyUrl;
       }
       
       // Resume the AudioContext if suspended (required on iOS / Safari
@@ -492,7 +493,7 @@ export function useAudioStreams() {
     audio.removeAttribute('src');
     // Small delay to let the element settle before reloading
     setTimeout(() => {
-      audio.src = `/api/proxy/${streamId}`;
+      audio.src = audio.dataset.proxyUrl || audio.src;
       audio.play().catch((err) => {
         console.error('Reconnect play failed:', err);
       });

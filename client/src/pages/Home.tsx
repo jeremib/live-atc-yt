@@ -19,7 +19,7 @@ export default function Home() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const response = await fetch('/api/streams');
+        const response = await fetch('/api/version');
         setIsServerConnected(response.ok);
       } catch (error) {
         setIsServerConnected(false);

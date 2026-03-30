@@ -1,26 +1,20 @@
-import { createContext, useContext, ReactNode, useState, useEffect, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Stream } from '@/lib/types';
-import { apiRequest } from '@/lib/queryClient';
+import { createContext, useContext, ReactNode, useState, useMemo, useCallback } from 'react';
+import { Stream, StreamType } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAudioStreams } from '@/hooks/useAudioStreams';
 import { useAutoReconnect, ReconnectState } from '@/hooks/useAutoReconnect';
 import { useStreamRecorder } from '@/hooks/useStreamRecorder';
-import {
-  saveStreams,
-  saveAudioStates,
-  loadSavedStreams,
-  loadSavedAudioStates
-} from '@/lib/localStorage';
+import { saveStreams, loadStreams, clearSavedData } from '@/lib/localStorage';
 import { useCompactMode } from '@/hooks/useCompactMode';
 
 interface StreamContextType {
   streams: Stream[];
   isLoading: boolean;
   error: Error | null;
-  addStream: (name: string, url: string, type?: string) => Promise<Stream | null>;
-  removeStream: (id: number) => Promise<boolean>;
-  updateStream: (id: number, data: Partial<Stream>) => Promise<Stream | null>;
+  addStream: (name: string, url: string, type?: string) => Stream;
+  removeStream: (id: number) => void;
+  updateStream: (id: number, data: Partial<Stream>) => void;
+  clearAllStreams: () => void;
   audioStates: Map<number, any>;
   playStream: (stream: Stream) => Promise<boolean>;
   pauseStream: (streamId: number) => void;
@@ -45,15 +39,36 @@ interface StreamContextType {
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
+function deriveFileName(url: string, type: string): string | undefined {
+  if (type === 'liveatc' || url.endsWith('.pls')) {
+    const parts = url.split('/');
+    return parts[parts.length - 1];
+  }
+  if (type === 'scanner' || type === 'noaa' || type === 'railroad') {
+    const parts = url.split('/');
+    return `${type}-${parts[parts.length - 1]}`;
+  }
+  if (type === 'somafm') {
+    const match = url.match(/\/([^/]+-128-mp3)$/);
+    return match ? `somafm-${match[1]}` : 'somafm-stream';
+  }
+  if (type === 'youtube') {
+    if (url.includes('list=')) {
+      const match = url.match(/[?&]list=([^#&?]+)/);
+      return match ? `playlist-${match[1]}` : 'youtube-playlist';
+    }
+    const match = url.match(/(?:v=|\/)([\w-]{11})(?:[^#&?]*)/);
+    return match ? `video-${match[1]}` : 'youtube-video';
+  }
+  return undefined;
+}
+
 export function StreamProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [error, setError] = useState<Error | null>(null);
-  const [isRestoringStreams, setIsRestoringStreams] = useState(false);
-  const [hasCheckedLocalStorage, setHasCheckedLocalStorage] = useState(false);
+  const [streams, setStreams] = useState<Stream[]>(() => loadStreams());
   const [focusedStreamId, setFocusedStreamId] = useState<number | null>(null);
   const { isCompact, toggleCompact } = useCompactMode();
-  
+
   const {
     audioElements,
     audioStates,
@@ -70,16 +85,6 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     getAudioState
   } = useAudioStreams();
 
-  // Fetch all streams (moved above useAutoReconnect so streamNames is available)
-  const {
-    data: streams = [],
-    isLoading,
-    isSuccess: streamsLoaded
-  } = useQuery<Stream[]>({
-    queryKey: ['/api/streams']
-  });
-
-  // Build a stream ID -> name map for notifications
   const streamNames = useMemo(() => {
     const map = new Map<number, string>();
     for (const s of streams) {
@@ -104,125 +109,71 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     stopRecording
   } = useStreamRecorder();
 
-  // Wrap startRecording to inject audioGraphs
   const startRecording = (streamId: number, streamName: string) => {
     rawStartRecording(streamId, streamName, audioGraphs);
   };
-  
-  // Add a new stream
-  const addStreamMutation = useMutation({
-    mutationFn: async (data: { name: string; url: string; type: string }) => {
-      const response = await apiRequest('POST', '/api/streams', data);
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/streams'] });
-      toast({
-        title: 'Stream Added',
-        description: 'The stream has been added successfully.',
-      });
-    },
-    onError: (err: Error) => {
-      toast({
-        title: 'Error',
-        description: `Failed to add stream: ${err.message}`,
-        variant: 'destructive',
-      });
-    }
-  });
-  
-  // Remove a stream
-  const removeStreamMutation = useMutation({
-    mutationFn: async (id: number) => {
-      try {
-        await apiRequest('DELETE', `/api/streams/${id}`);
-      } catch (err: any) {
-        // 404 is fine — stream already gone from server (e.g. after redeploy)
-        if (!err?.message?.includes('404')) throw err;
-      }
-      return id;
-    },
-    onSuccess: (id) => {
-      cleanupStream(id); // Clean up audio resources
-      queryClient.invalidateQueries({ queryKey: ['/api/streams'] });
-      toast({
-        title: 'Stream Removed',
-        description: 'The stream has been removed successfully.',
-      });
-    },
-    onError: (err: Error) => {
-      toast({
-        title: 'Error',
-        description: `Failed to remove stream: ${err.message}`,
-        variant: 'destructive',
-      });
-    }
-  });
-  
-  // Update a stream
-  const updateStreamMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<Stream> }) => {
-      const response = await apiRequest('PATCH', `/api/streams/${id}`, data);
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/streams'] });
-    },
-    onError: (err: Error) => {
-      toast({
-        title: 'Error',
-        description: `Failed to update stream: ${err.message}`,
-        variant: 'destructive',
-      });
-    }
-  });
-  
-  // Helper functions with proper error handling
-  const addStream = async (name: string, url: string, type: string = 'liveatc'): Promise<Stream | null> => {
-    try {
-      return await addStreamMutation.mutateAsync({ name, url, type });
-    } catch (error) {
-      return null;
-    }
-  };
-  
-  const removeStream = async (id: number): Promise<boolean> => {
-    try {
-      await removeStreamMutation.mutateAsync(id);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  };
-  
-  const updateStream = async (id: number, data: Partial<Stream>): Promise<Stream | null> => {
-    try {
-      return await updateStreamMutation.mutateAsync({ id, data });
-    } catch (error) {
-      return null;
-    }
-  };
-  
-  // Wrap playStream to sync connection status
+
+  const addStream = useCallback((name: string, url: string, type: string = 'liveatc'): Stream => {
+    const id = Date.now();
+    const newStream: Stream = {
+      id,
+      name,
+      url,
+      type: type as StreamType,
+      fileName: deriveFileName(url, type),
+      status: 'disconnected',
+      isPlaying: false,
+      createdAt: new Date().toISOString(),
+    };
+    setStreams(prev => {
+      const next = [...prev, newStream];
+      saveStreams(next);
+      return next;
+    });
+    return newStream;
+  }, []);
+
+  const removeStream = useCallback((id: number) => {
+    cleanupStream(id);
+    setStreams(prev => {
+      const next = prev.filter(s => s.id !== id);
+      saveStreams(next);
+      return next;
+    });
+    toast({
+      title: 'Stream Removed',
+      description: 'The stream has been removed successfully.',
+    });
+  }, [cleanupStream, toast]);
+
+  const updateStream = useCallback((id: number, data: Partial<Stream>) => {
+    setStreams(prev => {
+      const next = prev.map(s => s.id === id ? { ...s, ...data } : s);
+      saveStreams(next);
+      return next;
+    });
+  }, []);
+
+  const clearAllStreams = useCallback(() => {
+    // Cleanup all audio resources
+    streams.forEach(s => cleanupStream(s.id));
+    clearSavedData();
+    setStreams([]);
+    toast({
+      title: 'Data cleared',
+      description: 'All streams have been removed.',
+    });
+  }, [streams, cleanupStream, toast]);
+
   const playStream = async (stream: Stream) => {
     const success = await rawPlayStream(stream);
-    if (stream.type === 'youtube') {
-      // YouTube plays client-side, no server proxy to set status
-      await updateStream(stream.id, { status: success ? 'connected' : 'error' });
-    } else {
-      // LiveATC: server sets status in /api/proxy/:id, refetch to pick it up
-      queryClient.invalidateQueries({ queryKey: ['/api/streams'] });
-    }
     return success;
   };
 
-  // Wrap pauseStream to update status to disconnected
   const pauseStream = (streamId: number) => {
     rawPauseStream(streamId);
-    updateStream(streamId, { status: 'disconnected' });
   };
 
-  // Wrap togglePlayback to route through our wrapped play/pause
   const togglePlayback = async (stream: Stream) => {
     const state = getAudioState(stream.id);
     if (state?.isPlaying) {
@@ -232,54 +183,16 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Load saved streams from localStorage when the app first loads
-  useEffect(() => {
-    if (!streamsLoaded || hasCheckedLocalStorage || isRestoringStreams) return;
-
-    const savedStreams = loadSavedStreams();
-
-    if (savedStreams && savedStreams.length > 0 && streams.length === 0) {
-      setIsRestoringStreams(true);
-
-      const restoreStreams = async () => {
-        for (const stream of savedStreams) {
-          if (stream.name && stream.url && stream.type) {
-            await addStream(stream.name, stream.url, stream.type);
-          }
-        }
-        setIsRestoringStreams(false);
-        setHasCheckedLocalStorage(true);
-      };
-
-      restoreStreams();
-    } else {
-      setHasCheckedLocalStorage(true);
-    }
-  }, [streamsLoaded, hasCheckedLocalStorage, isRestoringStreams]);
-  
-  // Save streams to localStorage whenever they change
-  useEffect(() => {
-    if (hasCheckedLocalStorage && !isRestoringStreams) {
-      saveStreams(streams);
-    }
-  }, [streams, hasCheckedLocalStorage, isRestoringStreams]);
-  
-  // Save audio states to localStorage whenever they change
-  useEffect(() => {
-    if (audioStates.size > 0) {
-      saveAudioStates(audioStates);
-    }
-  }, [audioStates]);
-  
   return (
     <StreamContext.Provider
       value={{
         streams,
-        isLoading,
-        error,
+        isLoading: false,
+        error: null,
         addStream,
         removeStream,
         updateStream,
+        clearAllStreams,
         audioStates,
         playStream,
         pauseStream,

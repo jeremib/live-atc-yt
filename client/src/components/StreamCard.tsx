@@ -3,8 +3,7 @@ import { FaPlay, FaPause, FaVolumeUp, FaVolumeMute, FaTimes, FaStop, FaCircle, F
 import { Stream } from '@/lib/types';
 import { AudioVisualizer } from './AudioVisualizer';
 import { useStreams } from '@/contexts/StreamContext';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/queryClient';
+import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 
 interface StreamCardProps {
@@ -35,7 +34,6 @@ export function StreamCard({ stream, index }: StreamCardProps) {
   } = useStreams();
 
   const [isRetrying, setIsRetrying] = useState(false);
-  const queryClient = useQueryClient();
   const { toast } = useToast();
 
   // Swipe state
@@ -213,37 +211,23 @@ export function StreamCard({ stream, index }: StreamCardProps) {
       .join(':');
   };
 
-  // Retry connecting to a stream
-  const retryStreamMutation = useMutation({
-    mutationFn: async (id: number) => {
-      setIsRetrying(true);
-      const response = await apiRequest('PATCH', `/api/streams/${id}`, { status: 'connecting' });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/streams'] });
-      toast({
-        title: 'Reconnecting',
-        description: `Attempting to reconnect to ${data.name}...`
-      });
-
-      setTimeout(() => {
-        togglePlayback(data);
-        setIsRetrying(false);
-      }, 1000);
-    },
-    onError: () => {
-      setIsRetrying(false);
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    toast({
+      title: 'Reconnecting',
+      description: `Attempting to reconnect to ${stream.name}...`
+    });
+    try {
+      await togglePlayback(stream);
+    } catch {
       toast({
         title: 'Connection Failed',
         description: 'Could not reconnect to the stream. Please try again.',
         variant: 'destructive'
       });
+    } finally {
+      setIsRetrying(false);
     }
-  });
-
-  const handleRetry = () => {
-    retryStreamMutation.mutate(stream.id);
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {

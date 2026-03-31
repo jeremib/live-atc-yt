@@ -122,17 +122,14 @@ export class StreamService {
       })),
     ];
 
-    // Probe in small batches to avoid CDN rate-limiting (429)
-    const BATCH_SIZE = 4;
+    // Probe sequentially with a delay between requests to avoid CDN 429 rate-limiting.
+    // The CDN has strict per-IP rate limits — even batches of 4 trigger it.
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
     const feeds: Array<{ name: string; url: string; label: string }> = [];
-    for (let i = 0; i < probes.length; i += BATCH_SIZE) {
-      const batch = probes.slice(i, i + BATCH_SIZE);
-      const results = await Promise.allSettled(
-        batch.map(({ url, label }) => this.probeFeed(url, icao, label))
-      );
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value) feeds.push(r.value);
-      }
+    for (const { url, label } of probes) {
+      const result = await this.probeFeed(url, icao, label);
+      if (result) feeds.push(result);
+      await delay(150);
     }
 
     this.feedCache.set(code, feeds);

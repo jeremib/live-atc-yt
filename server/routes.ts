@@ -190,13 +190,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Provide a 3-4 letter airport code" });
       }
 
-      let feeds = await streamService.searchFeeds(q);
       let icao = q;
+      // For 3-letter codes, try K-prefix first (US IATA → ICAO), then raw
+      if (q.length === 3) {
+        icao = `K${q}`;
+      }
+      let feeds = await streamService.searchFeeds(icao);
 
-      // If 3-letter code with no results, try prefixing with K (US IATA → ICAO)
+      // If K-prefixed found nothing, try the raw 3-letter code
       if (feeds.length === 0 && q.length === 3) {
-        feeds = await streamService.searchFeeds(`K${q}`);
-        if (feeds.length > 0) icao = `K${q}`;
+        icao = q;
+        feeds = await streamService.searchFeeds(q);
       }
 
       // Look up airport metadata for the resolved ICAO code

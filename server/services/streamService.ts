@@ -87,6 +87,7 @@ export class StreamService {
           'Referer': 'https://www.liveatc.net/',
         },
       });
+      log(`Probe ${cdnUrl} → ${resp.status}`, 'streamService');
       if (!(resp.status >= 300 && resp.status < 400)) return null;
 
       const upperIcao = icao.toUpperCase();
@@ -121,13 +122,18 @@ export class StreamService {
       })),
     ];
 
-    const results = await Promise.allSettled(
-      probes.map(({ url, label }) => this.probeFeed(url, icao, label))
-    );
-
-    const feeds = results
-      .map((r) => (r.status === 'fulfilled' ? r.value : null))
-      .filter((r): r is NonNullable<typeof r> => r !== null);
+    // Probe in small batches to avoid CDN rate-limiting (429)
+    const BATCH_SIZE = 4;
+    const feeds: Array<{ name: string; url: string; label: string }> = [];
+    for (let i = 0; i < probes.length; i += BATCH_SIZE) {
+      const batch = probes.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(({ url, label }) => this.probeFeed(url, icao, label))
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) feeds.push(r.value);
+      }
+    }
 
     this.feedCache.set(code, feeds);
     return feeds;
